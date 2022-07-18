@@ -1,0 +1,14 @@
+*.db
+*.log
+*.png
+*.txt
+!requirements.txt
+pyvenv.cfg
+config.ini
+import_codes.py
+plu_barcodes/
+# System venv folders
+__pycache__/
+Include/
+Lib/
+Scripts/
