@@ -2,10 +2,11 @@ from bcode import CreatePluBarcode
 from pathlib import Path
 from configparser import ConfigParser
 from statistics import mode
-from model import Model, Code, User
+from model import Model, Code, User, ModelMongo
 from loguru import logger
 from math import floor
 
+import re
 import telebot
 import sqlite3
 
@@ -21,6 +22,7 @@ conf.read(config_file.absolute())
 
 bot = telebot.TeleBot(conf['Telegram']['bot_token'])
 model = Model(conf['Database']['name'])
+model_mongo = ModelMongo(conf['MongoDB']['uri'], conf['MongoDB']['db'], conf['MongoDB']['collection'])
 default_profile = 'search'
 profile = default_profile
 chat_id = ''
@@ -73,6 +75,13 @@ def com_create_bcode(message):
     logger.debug('Пошук по PLU-коду')
 
 
+def upd_number(res: str) -> float:
+	if res[-1:] != "0":
+		return float(res)
+	res = re.sub(r"([\.\d]+)0$","\\1",res)
+	return float(res+"1")
+
+
 
 @bot.message_handler(content_types=["text"])
 def handler_text(message):
@@ -82,11 +91,12 @@ def handler_text(message):
             m = message.text
             m = m.split(',')
             bc = CreatePluBarcode()
-            bc.gen_data_plu_bcode(int(m[0]), float(m[1]))
-            res = model.search_product_for_code(int(m[0]))
+            vaga = upd_number(m[1])
+            bc.gen_data_plu_bcode(int(m[0]), vaga)
+            res = model_mongo.search_product_for_code(int(m[0]))
             if len(res) == 1:
-                pr = floor( float(res[0].price) * float(m[1]) )
-                cp = f"{res[0].name}\n\nКод: {m[0]}\nЦіна: {res[0].price}грн\nВага: {m[1]}\nОрінтовна ціна: {pr} грн."
+                pr = floor( float(res[0].price) * vaga )
+                cp = f"{res[0].name}\n\nКод: {m[0]}\nЦіна: {res[0].price}грн\nВага: {vaga}\nОрінтовна ціна: {pr} грн."
                 bot.send_photo(message.chat.id, bc.get_file_ean13(), caption=cp)
             else:
                 cp = "Невдалося знайти товар в базі! Потрібно оновити базу, скиньте Богдану файл PLUData.xls"
@@ -94,7 +104,7 @@ def handler_text(message):
             profile = default_profile
         case 'search_code':
             cod = int( message.text)
-            res = model.search_product_for_code(cod)
+            res = model_mongo.search_product_for_code(cod)
             msg = f'Пошук по коду {cod}.\n'
             msg += 'Всі коди: ' + str(len(res)) + '\n'
             for c in res:
@@ -102,7 +112,7 @@ def handler_text(message):
             bot.send_message(message.chat.id, msg)
             profile = default_profile
         case 'search':
-            res = model.search_code(message.text)
+            res = model_mongo.search_code(message.text)
             logger.debug(res)
             msg = 'Знайдено: ' + str(len(res)) + ':\n'
             for c in res:
@@ -119,7 +129,7 @@ def handler_text(message):
             bot.send_message(message.chat.id, 'Щось пішло не так... Спробуйте знову')
             
 
-logger.info('Бот звпущений...')
+logger.info('Бот (MONGO test) звпущений...')
 try:
     bot.infinity_polling()
 except:

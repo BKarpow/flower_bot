@@ -1,7 +1,8 @@
 import code
+import re
 from loguru import logger
 import sqlite3
-
+from pymongo import MongoClient
 from transliterator import TransliterateUkr
 
 class Code:
@@ -31,7 +32,7 @@ class Code:
 
 
     def __str__(self) -> str:
-        t = f'{self.name} : {self.code},\n'
+        t = f'{self.name} : {self.code}, ціна: {self.price}\n'
         if self.code_n != 0:
             t = f'{self.name} : {self.code}, Н {self.code_n}\n'
         return t
@@ -141,7 +142,7 @@ class Model:
         search_text = self.tr.transliteration(search_text, spec=True).upper()
         self.cursor.execute(f'SELECT * FROM codes where search_name LIKE "%{search_text}%" LIMIT 80')
         for c in self.cursor.fetchall():
-            codes.append( Code(c[0], c[2], c[3]) )
+            codes.append( Code(name=c[0], code=c[2], price=c[4]) )
         return codes
 
 
@@ -151,5 +152,78 @@ class Model:
         self.cursor.execute(f'SELECT * FROM codes where code = {code}')
         for c in self.cursor.fetchall():
             codes.append( Code(name=c[0], code=c[2], price=c[4]) )
+        return codes
+            
+
+            
+class ModelMongo:
+    def __init__(self, uri_mongo, database, collection) -> None:
+        try:
+            self.client = MongoClient(uri_mongo)
+            self.db = self.client[database]
+            self.collection = self.db[collection]
+        except:
+            logger.error('Помилка конекту до монго...')
+        self.tr = TransliterateUkr()
+
+
+    def add_new_code(self, code: Code) -> Code:
+        q = 'insert into codes (name, search_name, code, code_n, price) values (?, ?, ?, ?, ?)'
+        self.cursor.execute(q, (code.name, code.search_name, code.code, code.code_n, code.price))
+        self.connect.commit()
+        self.cursor.execute(f'SELECT rowid, name, code, code_n, price FROM codes WHERE code = {code.code}')
+        row = self.cursor.fetchone()
+        if row != None:
+            return Code(rowid=row[0], name=row[1], code=row[2], code_n=row[3],price=row[4])
+        else:
+            return Code('Немає товару', 0)
+
+
+    def add_new_user(self, user: User) -> User:
+        logger.debug(user.username)
+        q = 'insert into users (username, chat_id, admin) values (?, ?, ?)'
+        self.cursor.execute(q, (user.username, user.chat_id, user.admin))
+        self.connect.commit()
+        self.cursor.execute(f'SELECT * FROM users WHERE username="{user.username}"')
+        row = self.cursor.fetchone()
+        if row != None:
+            u = User()
+            u.username = row[0]
+            u.chat_id = row[1]
+            u.admin = row[2]
+            return u
+        else:
+            return User()
+
+
+    def is_exists_user(self, user: User) -> bool:
+        q = f'select username from users where username = "{user.username}"'
+        self.cursor.execute(q)
+        return bool(self.cursor.fetchone())
+
+
+    def all_codes(self) -> list:
+        q = 'SELECT * FROM codes ORDER BY name ASC LIMIT 80'
+        self.cursor.execute(q)
+        codes = []
+        for row in self.cursor.fetchall():
+            codes.append( Code(name=row[0], code=row[2], code_n=row[3]) )
+        return codes
+
+
+    def search_code(self, search_text: str) -> list:
+        codes = []
+        search_text = self.tr.transliteration(search_text, spec=True).upper()
+        exp = re.compile(search_text, re.IGNORECASE)
+        for doc in self.collection.find({"searchMask": exp}):
+            codes.append( Code(name=doc['name'], code=doc['code'], price=doc['price']) )
+        return codes
+
+
+    def search_product_for_code(self, code: int) -> list:
+        codes = []
+        code = int(code)
+        for doc in self.collection.find({"code": code}):
+            codes.append( Code(name=doc['name'], code=doc['code'], price=doc['price']) )
         return codes
             
